@@ -1,0 +1,1336 @@
+<!-- RUNNING IN DEV MODE (LOCALHOST)
+ In order to connect to GitHub to save while in Dev 
+ Place this after the local url: ?redirect=https://trafford44.github.io/bianrepo/
+ So from VSCode, Live Server it would be http://127.0.0.1:5500/index.html?redirect=https://trafford44.github.io/bianrepo/
+ Once signed in the URL goes to https://trafford44.github.io/bianrepo/, but it's looking at Dev environment localStorage for data, 
+ so you can test saving/loading without affecting the live version.
+ BUT I see that the code changes don't reflect in the live version until I do a new GitHub release, 
+ so for now I can just test the GitHub integration in Dev mode and then I'll need to deploy to prod to see the interactions with any code changes.
+ Ask AI about a workaround to not being able to setup a 2nd aAuth in GitHub for teh dev env, to get around this limitation
+ -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>BIAN Knowledgebase</title>
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <!-- Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/plantuml-encoder@1.4.0/dist/plantuml-encoder.min.js"></script>
+    <style>
+        /* -------------------------------------------------------
+        1. Base Variables, Reset & Global Styles
+        ------------------------------------------------------- */
+        :root {
+            --bg-body: #eef1f5;
+
+            /* Panels */
+            --bg-sidebar: #f8fafc;
+            --bg-editor: #0f172a;
+            --bg-preview: #f3f6fa;
+
+            /* Header / cards */
+            --bg-header: #ffffff;
+            --bg-card: #f1f5f9;
+
+            /* Borders */
+            --border-color: #d4d7dd;
+
+            /* Text */
+            --text-main: #6B6B6B;
+            --text-muted: #64748b;
+
+            /* Accent */
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --accent-light: #e0ecff;
+
+            /* Danger */
+            --danger: #dc2626;
+            --danger-bg: #fef2f2;
+
+            --resizer-width: 4px;
+
+            /* Text window font sizes & color*/
+            --editor-font-size: 14px;
+            --preview-font-size: 16px;
+            --editor-font-color: #93c5fd;
+            --preview-font-color: #202020;
+
+            /* Zooming*/
+            --preview-zoom-scale: 1;
+            --puml-zoom-scale: 1;            
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            height: 100dvh;
+            overflow: hidden;
+            background: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+        }
+
+        .hidden { display: none !important; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
+
+
+        /* -------------------------------------------------------
+        2. Layout Structure (Sidebar, Main Content, Workspace)
+        ------------------------------------------------------- */
+        .sidebar {
+            width: 300px;
+            min-width: 200px;
+            max-width: 500px;
+            height: 100dvh;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100dvh;
+            background: #fff;
+            min-width: 0;
+        }
+
+        .workspace-grid {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            width: 100%;
+        }
+
+        #editor-container {
+            width: 50%;
+            min-width: 100px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #editor-textarea {
+            flex: 1;
+            width: 100%;
+            font-family: 'Fira Code', 'Courier New', monospace;
+            resize: none;
+            border: none;
+            outline: none;
+            padding: 2rem;
+            font-size: var(--editor-font-size);
+            color: var(--editor-font-color);
+            line-height: 1.6;
+            background: var(--bg-editor);
+        }
+
+        #preview-pane {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+            font-size: var(--preview-font-size);
+            color: var(--preview-font-color);
+            border-left: 1px solid var(--bg-body);
+            background: var(--bg-preview);
+            min-width: 100px;
+        }
+        
+        #preview-pane img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            object-fit: contain;
+            object-position: left top;
+            transform: scale(var(--preview-zoom-scale));
+            transform-origin: top left;
+        }
+
+        /* Inside your preview pane (.prose) styles */
+        #preview-pane table {
+            border-collapse: collapse;
+        }
+
+        #preview-pane th {
+            position: sticky;
+            top: -2rem; /* Matches your padding */
+            background: var(--bg-card);
+            z-index: 2;
+            box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1); /* Subtle shadow so it looks "above" the data */
+        }
+
+        /* -------------------------------------------------------
+        3. Resizers
+        ------------------------------------------------------- */
+        .resizer {
+            width: var(--resizer-width);
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.2s;
+            z-index: 10;
+            flex-shrink: 0;
+            touch-action: none; /* prevents scrolling while dragging */
+        }
+
+        .resizer:hover,
+        .resizing {
+            background: var(--accent);
+        }
+
+
+        /* -------------------------------------------------------
+        4. Sidebar (Header, List, Items)
+        ------------------------------------------------------- */
+        .sidebar-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f9fafb;
+        }
+
+        .sidebar-header h1 {
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: calc(env(safe-area-inset-bottom) + 24px);
+        }
+
+        .subject-header {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            border-bottom: 1px solid #f9fafb;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .subject-header:hover { background: #f9fafb; }
+
+        .chevron {
+            display: inline-block;
+            margin-right: 0.5rem;
+            font-size: 0.6rem;
+            transition: transform 0.2s;
+        }
+
+        .chevron.open { transform: rotate(90deg); }
+
+        .folder-name { flex: 1; }
+
+        .file-item {
+            padding: 0.5rem 1rem 0.5rem 2.5rem;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-left: 3px solid transparent;
+            transition: all 0.2s;
+        }
+
+
+        .file-item:hover { background: #f3f4f6; }
+
+        .file-item.active {
+            background: var(--accent-light);
+            border-left-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .file-icon {
+            opacity: 0.6;
+            margin-right: 0.5rem;
+            font-weight: 700;
+            font-family: monospace;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 4px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .file-item:hover .file-actions { opacity: 1; }
+
+        .btn-add-file, .btn-rename-folder, .btn-delete-folder, .btn-close-sidebar {
+            font-size:0.75em;
+            padding: 2px 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: #fff;
+            color: var(--text-main);
+            cursor: pointer;
+        }
+
+
+        /* -------------------------------------------------------
+        4b. Hamburger Button (Mobile Sidebar Toggle)
+        ------------------------------------------------------- */
+
+        .hamburger-btn {
+            display: none; /* hidden by default */
+            font-size: 1.25rem;
+            padding: 0.5rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-main);
+        }
+
+        .hamburger-btn:hover {
+            background: #f3f4f6;
+            border-radius: 6px;
+        }
+        @media (max-width: 768px) {
+            .hamburger-btn {
+                display: block;
+            }
+        }
+
+        /* -------------------------------------------------------
+        5. Toolbar (File Toolbar + Markdown Toolbar)
+        ------------------------------------------------------- */
+        .file-toolbar {
+            height: var(--header-height);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #fff;
+            flex-shrink: 0;
+        }
+
+        .toolbar-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex: 1; /* allows title + status to take natural space */
+        }
+
+        .toolbar-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .md-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .btn-tool {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.4rem 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: #fff;
+            cursor: pointer;
+            color: var(--text-main);
+        }
+
+        .btn-tool:hover { background: #f9fafb; }
+
+        .btn-danger {
+            color: var(--danger);
+            border-color: #fee2e2;
+        }
+
+        .btn-danger:hover {
+            background: var(--danger-bg);
+        }
+
+        .icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            border-radius: 4px;
+            color: var(--text-muted);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .icon-btn:hover {
+            background: #e5e7eb;
+            color: var(--text-main);
+        }
+
+        .icon-btn.del:hover {
+            background: var(--danger-bg);
+            color: var(--danger);
+        }
+
+        .md-color-popup,
+        .md-bgcolor-popup,
+        .md-table-popup {
+            position: absolute;
+            background: white;
+            border: 1px solid var(--border-color);
+            padding: 0.25rem;
+            border-radius: 6px;
+            display: flex;
+            gap: 0.25rem;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+
+        .popup-section-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin: 0.5rem 0 0.25rem;
+        }
+
+        .color-swatch {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            border: 1px solid rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+
+        /* -------------------------------------------------------
+        6. Markdown Preview Styling (.prose)
+        ------------------------------------------------------- */
+        .prose img {
+            display: block;
+            margin: 1.5rem auto;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            max-width: 100%;
+        }
+        /* loosen the spacing between paragraphs but keep lists tight.  Making everythign tight s an issue with 'marked' parser for MD v9*/
+        /* to be precice:
+            Paragraph → paragraph spacing
+            List → paragraph spacing
+            Paragraph → list spacing
+            Heading → paragraph spacing
+            Image → paragraph spacing
+            Code block → paragraph spacing
+            Everything → everything spacing */
+        .prose > * + * {
+            margin-top: 1em !important;
+        }
+
+        .prose blockquote {
+            margin-left: 1.5em;
+            padding-left: 1em;
+            border-left: 3px solid #ddd;
+            color: #555;
+        }
+
+        /* ============================
+        Joplin‑Style Markdown Tables
+        ============================ */
+
+        .prose table {
+            border-collapse: separate !important;  /* force separate borders */
+            border-spacing: 0;
+            table-layout: auto;
+            width: auto;
+
+            background: #fcfcfc;      /* your purple background */
+            border: 2px solid #9f9f9ff0;   /* try white to confirm visibility */
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+
+        /* ----- Header Row ----- */
+        .prose thead tr {
+            background: #f5f5f5;
+            border-bottom: 2px solid #444; /* heavier separator */
+        }
+
+        .prose th {
+            text-align: left;
+            padding: 6px 10px;
+            font-weight: 600;
+            border-right: 1px solid #ddd;
+            border-top: 1px solid #ddd;    /* ensures top border is visible */
+            border-bottom: 4px solid #ddd;
+        }
+
+        /* Remove right border on last header cell */
+        .prose th:last-child {
+            border-right: none;
+        }
+
+        /* ----- Body Rows ----- */
+        .prose td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #ddd;
+            border-right: 1px solid #ddd;
+        }
+
+        /* Remove right border on last cell */
+        .prose td:last-child {
+            border-right: none;
+        }
+
+        /* Alternating row shading */
+        .prose tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        /* Ensure left border is visible */
+        .prose td:first-child,
+        .prose th:first-child {
+            border-left: 1px solid #ddd;
+        }
+
+
+
+        /* -------------------------------------------------------
+        7. Sync Status Indicators
+        ------------------------------------------------------- */
+        .sync-status {
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            white-space: nowrap;
+            background: #f3f4f6;
+            color: #6b7280;
+            margin: 0; /* remove auto margins */
+        }
+
+        .sync-idle {
+            background-color: #f3f4f6;
+            color: #6b7280;
+        }
+
+        .sync-saving {
+            background-color: #fef9c3;
+            color: #a16207;
+        }
+
+        .sync-synced {
+            background-color: #dcfce7;
+            color: #15803d;
+        }
+
+        .sync-error {
+            background-color: #fee2e2;
+            color: #b91c1c;
+        }
+
+        .sync-readonly {
+            background-color: #e5e7eb; /* soft gray */
+            color: #6b7280;
+        }
+
+        .btn-close-sidebar { display: none; }
+
+        /* -------------------------------------------------------
+        8. Login State Styles
+        ------------------------------------------------------- */
+        .github-login-needed {
+            background: #fef2f2;
+            border-color: #fecaca;
+            color: #b91c1c;
+        }
+
+        .github-logged-in {
+            background: var(--accent-light);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .empty-workspace {
+            padding: 1rem;
+            opacity: 0.75;
+            font-style: italic;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .empty-workspace .hint {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .notification {
+            font-size: 0.85rem;
+            padding: 2px 8px;
+            border-radius: 6px;
+            margin-left: 0.5rem; /* sits right of sync pill */
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        .notification a {
+            pointer-events: auto;
+        }
+
+        .notification.show {
+            opacity: 1;
+        }
+
+        .notification-info {
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .notification-success {
+            background: #dcfce7;
+            color: #15803d;
+        }
+        
+        .notification-warning {
+            background: #fef3c7; /* soft amber */
+            color: #92400e;      /* deep amber/brown for contrast */
+        }
+
+        .notification-error {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+
+        .notification-countdown {
+            background: #fee2e2;
+            color: #b91c1c;
+            font-weight: 600;
+            pointer-events: auto; /* allow clicking the Cancel link */
+        }
+
+        .notification-countdown a {
+            color: #b91c1c;
+            text-decoration: underline;
+            cursor: pointer;
+            margin-left: 6px;
+        }
+
+        .notification.notification-countdown {
+            pointer-events: auto;
+        }
+
+        .cloud-disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        #countdown-modal .modal-panel {
+            background: var(--bg);
+            color: var(--fg);
+            padding: 24px 28px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 6px 28px rgba(0,0,0,0.35);
+            text-align: center;
+            border: 1px solid var(--border);
+        }
+
+        #countdown-modal .modal-message {
+            margin-bottom: 14px;
+            font-size: 15px;
+            line-height: 1.45;
+        }
+
+        #countdown-modal .modal-count {
+            font-size: 36px;
+            font-weight: 600;
+            margin: 0 0 22px 0;
+            color: var(--accent);
+        }
+
+        #countdown-modal button {
+            padding: 8px 14px;
+            font-size: 14px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--button-bg);
+            color: var(--button-fg);
+            cursor: pointer;
+        }
+
+        #countdown-modal button.primary {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        #countdown-modal button + button {
+            margin-left: 10px;
+        }
+
+        details summary {
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        details > *:not(summary) {
+            margin-left: 1.2rem;   /* or whatever indent you prefer */
+        }
+
+        .context-menu {
+            position: absolute;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 9999;
+            min-width: 160px;
+            padding: 4px 0;
+        }
+
+        .context-menu.hidden {
+            display: none;
+        }
+
+        .context-menu ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .context-menu li {
+            padding: 8px 14px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .context-menu li:hover {
+            background: #f0f0f0;
+        }
+
+        .item-menu-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 2px 6px;
+            opacity: 0;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            transform: translateX(4px);
+        }
+
+        .sidebar-folder-header:hover .item-menu-btn,
+        .file-item:hover .item-menu-btn {
+            opacity: 1;
+            transform: translateX(0);            
+        }
+
+        .sidebar-folder-header:hover {
+            background: #f3f4f6;;
+        }
+
+        .sidebar-folder-header {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem 1rem; /* top/bottom + right padding */
+            padding-left: 0;      /* overridden by JS depth padding */
+            cursor: pointer;
+        }
+
+
+        .folder-actions {
+            margin-left: auto;
+        }
+
+        @media (hover: none) and (pointer: coarse) {
+            .item-menu-btn {
+                opacity: 1 !important;
+                padding: 6px 10px;      /* bigger tap target */
+                font-size: 20px;        /* easier to hit */
+            }
+        }
+
+        #preview-pane svg {
+            transform: scale(var(--preview-zoom-scale));
+            transform-origin: top left;
+            width: 100% !important;
+            height: auto !important;
+            max-width: none !important; /* important: prevents shrinking */
+            display: block;
+        }
+
+        #sync-toggle-btn {
+            padding: 4px 10px;
+            font-size: 0.85rem;
+            border-radius: 4px;
+            border: 1px solid var(--border-color, #ccc);
+            background: var(--button-bg, #f5f5f5);
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        /* When sync is running */
+        #sync-toggle-btn.sync-running {
+            background: #d9534f;      /* soft red */
+            color: white;
+            border-color: #b52b27;
+        }
+
+        /* When sync is stopped */
+        #sync-toggle-btn.sync-stopped {
+            background: #5cb85c;      /* soft green */
+            color: white;
+            border-color: #3d8b3d;
+        }
+
+        #test-btn {
+            display: none;
+        }
+
+        .readonly-mode #editor-textarea {
+            background: #f5f5f5;
+        }
+        .readonly-mode .folder-actions,
+        .readonly-mode .file-actions {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .mobile-debug-btn {
+            display: none;
+        }
+
+        .mobile-debug-active .mobile-debug-btn {
+            display: inline-block;
+            background: #0f2b89;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* 
+        #reconnect-link {
+            padding: 2px 6px;
+            background: var(--accent-color);
+            color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        #reconnect-link {
+            color: var(--accent-color);
+            text-decoration: underline;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        */
+        
+        /* -------------------------------------------------------
+        9. Responsive Layout (Mobile, Tablet, Desktop)
+        — Structural skeleton only —
+        — No overrides yet —
+        ------------------------------------------------------- */
+
+        /* -------------------------------------------------------
+        Mobile Layout (≤ 768px)      @media (max-width: 600px) {
+        - Stacked layout
+        - Sidebar hidden
+        - No resizers
+        - Editor first, preview second
+        - Toolbar wraps
+        ------------------------------------------------------- */
+
+        /* -------------------------------------------------------
+        MOBILE (max-width: 768px)
+        - Sidebar drawer
+        - Touch-friendly toolbar
+        - Hamburger visible
+        - Layout handled by global rules below
+        ------------------------------------------------------- */
+
+        @media (max-width: 768px) {
+
+            /* Sidebar becomes a slide-in drawer on mobile */
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: -300px;
+                height: 100vh;
+                z-index: 100;
+                transition: left 0.25s ease;
+            }
+
+            .sidebar-open .sidebar {
+                left: 0;
+            }
+
+            /* Main content becomes vertical */
+            .main-content {
+                flex-direction: column;
+            }
+
+            /* Toolbar wraps naturally */
+            .file-toolbar,
+            .md-toolbar {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                width: 100%; /* ensure full width */
+            }
+
+            /* ⭐ NEW: Top toolbar scrolls horizontally */
+            .file-toolbar {
+                overflow-x: auto;
+                white-space: nowrap;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            /* Touch-friendly buttons 
+            --causing crunched text on mobile sidebar
+            .btn-tool,
+            .icon-btn {
+                padding: 0.6rem 0.9rem;
+            }
+            */
+
+            /* Hamburger visible */
+            .hamburger-btn {
+                display: block;
+            }
+
+            /* Force editor to full width in portrait */
+            #editor-container {
+                width: 100% !important;
+                max-width: 100% !important;
+                flex: 1 1 auto !important;
+            }
+
+            /* Hide the vertical resizer on mobile portrait */
+            #editor-resizer {
+                display: none !important;
+            }
+
+        }
+
+
+
+
+        /* -------------------------------------------------------
+        TABLET PORTRAIT (600–900px, portrait)
+        - Sidebar visible if width allows
+        - Touch-friendly toolbar
+        - Layout handled by global rules below
+        ------------------------------------------------------- */
+
+        @media (min-width: 600px) 
+            and (max-width: 1400px) 
+            and (pointer: coarse) 
+            and (orientation: portrait) {
+
+            .sidebar {
+                display: block;
+                width: 260px;
+                min-width: 200px;
+                max-width: 300px;
+            }
+
+            .main-content {
+                flex-direction: column;
+            }
+
+            .file-toolbar,
+            .md-toolbar {
+                overflow-x: auto;             
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .btn-tool,
+            .icon-btn {
+                padding: 0.55rem 0.85rem;
+            }
+        }
+
+
+
+        /* -------------------------------------------------------
+        TABLET LANDSCAPE (600–900px, landscape)
+        - Sidebar visible
+        - Touch-friendly toolbar
+        - Layout handled by global rules below
+        ------------------------------------------------------- */
+
+        @media (min-width: 600px) 
+            and (max-width: 1400px) 
+            and (pointer: coarse) 
+            and (orientation: landscape) {
+
+            .sidebar {
+                display: flex;
+                width: 260px;
+                min-width: 200px;
+                max-width: 300px;
+            }
+
+            .main-content {
+                flex-direction: column;
+            }
+
+            .file-toolbar,
+            .md-toolbar {
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .btn-tool,
+            .icon-btn {
+                padding: 0.55rem 0.85rem;
+            }
+
+            /* Ensure sidebar resizer works in landscape */
+            #sidebar-resizer {
+                pointer-events: auto;
+                touch-action: none;
+                flex-shrink: 0;
+                width: var(--resizer-width);
+                background: transparent;
+            }
+
+            #sidebar {
+                flex-shrink: 0;
+            }
+
+            #workspace-grid {
+                overflow: visible;
+            }
+            /* Set colour blue */
+            #editor-resizer.resizing {
+                background: var(--accent-color, #3b82f6) !important;
+            }
+
+            
+        }
+
+
+
+        /* -------------------------------------------------------
+        DESKTOP (≥ 900px)
+        - Sidebar visible
+        - Toolbar stays single-row
+        - Layout handled by global rules below
+        ------------------------------------------------------- */
+
+        @media (min-width: 900px) and (pointer: fine) {
+
+            .sidebar {
+                display: flex;
+                width: 300px;
+                min-width: 200px;
+                max-width: 500px;
+            }
+
+            .main-content {
+                flex-direction: column;
+            }
+
+            .file-toolbar,
+            .md-toolbar {
+                flex-wrap: nowrap;
+            }
+        }
+
+        @media (max-width: 1400px) and (orientation: portrait) {
+            .btn-close-sidebar {
+                display: inline-block;
+            }
+        }
+
+
+        /* -------------------------------------------------------
+        GLOBAL LAYOUT LOGIC (applies to ALL devices)
+        This is the new unified system:
+        - Desktop + tablet landscape + mobile landscape → ROW
+        - Tablet portrait + mobile portrait → COLUMN
+        - Resizer always visible when both panes visible
+        ------------------------------------------------------- */
+
+        /* Base layout */
+        .workspace-grid {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            width: 100%;
+        }
+
+        /* Resizer visible by default */
+        .resizer {
+            display: block;
+            cursor: col-resize;
+        }
+
+        /* 1. Desktop + tablet landscape (≥ 900px) → ROW */
+        @media (min-width: 900px) {
+            .workspace-grid {
+                flex-direction: row;
+            }
+            .resizer {
+                display: block !important;
+                cursor: col-resize;
+            }
+        }
+
+        /* 2. Mobile landscape (< 900px + landscape) → ROW */
+        @media (max-width: 900px) and (orientation: landscape) {
+            .workspace-grid {
+                flex-direction: row;
+            }
+            .resizer {
+                display: block !important;
+                cursor: col-resize;
+            }
+
+            .file-toolbar {
+                overflow-x: auto;
+                white-space: nowrap;
+                -webkit-overflow-scrolling: touch;
+            }
+        }
+
+        /* 3. Tablet portrait + mobile portrait (< 900px + portrait) → COLUMN */
+        @media (max-width: 900px) and (orientation: portrait) {
+            .workspace-grid {
+                flex-direction: column;
+            }
+
+            /* Hide sidebar resizer in portrait – sidebar is a drawer here */
+            #sidebar-resizer {
+                display: none !important;
+            }
+
+            .resizer {
+                display: block !important;
+                cursor: row-resize; /* optional */
+            }
+
+            /* Editor resizer: horizontal between preview and editor */
+            #editor-resizer {
+                display: block !important;
+                width: 100%;
+                height: 6px;
+                cursor: row-resize;
+                background: #ddd;
+                flex-shrink: 0;
+            }  
+
+            #editor-resizer.resizing {
+                background: var(--accent-color, #3b82f6) !important;
+            }
+
+            #editor-container {
+                flex: none !important;
+            }
+
+        }
+
+        /* 4. When user hides the editor → resizer disappears */
+        .editor-hidden #editor-container {
+            display: none;
+        }
+
+        .editor-hidden .resizer {
+            display: none !important;
+        }
+
+
+        /* -------------------------------------------------------
+        Editor Hidden Mode (works on all screen sizes)
+        ------------------------------------------------------- */
+
+        .editor-hidden #editor-container {
+            display: none;
+        }
+
+        .editor-hidden #preview-pane {
+            width: 100% !important;
+            min-width: 0;
+            border-left: none;
+        }
+
+        /* -------------------------------------------------------
+        10. Miscellaneous
+        ------------------------------------------------------- */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #9ca3af;
+        }
+
+        .type-label-md { color: var(--accent); font-weight: bold; }
+        .type-label-puml { color: #f97316; font-weight: bold; }
+
+    </style>
+</head>
+<body>
+
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <h1>Data Modelling  KB</h1>
+            <button id="add-folder-btn" class="btn-add-file">+ Folder</button>
+            <button id="collapse-all-btn" title="Collapse sidebar" class="btn-add-file">–</button>
+            <button id="close-sidebar-btn" class="btn-close-sidebar">✖</button>
+            <!-- light version of the close button × -->
+        </div>
+        <div id="sidebar-list" class="sidebar-list"></div>
+    </aside>
+    <div id="context-menu" class="context-menu hidden">
+        <ul></ul>
+    </div>
+    <div id="sidebar-resizer" class="resizer"></div>
+
+    <main class="main-content">
+        <header id="file-header" class="file-toolbar">
+            <button id="sidebar-toggle" class="hamburger-btn">☰</button>
+            <div class="toolbar-info">
+                <span id="active-file-type-icon"></span>
+                <h2 id="active-file-title" style="font-size: 1rem; color: #374151;">Select or create a file</h2>
+                <div id="sync-status" class="sync-status sync-idle">Idle</div>
+                <div id="notification" class="notification"></div>
+            </div>            
+            <div id="editor-actions" class="toolbar-actions">
+                <button id="purge-logs-btn" class="btn-tool mobile-debug-btn">Purge Logs</button>
+                <button id="dump-logs-btn" class="btn-tool mobile-debug-btn">Dump Logs</button>
+                <button id="toggle-editor" class="btn-tool">Hide Source</button>
+                <button id="github-login" class="btn-tool">Sign in to cloud</button>
+                <button id="save-btn" class="btn-tool">Save to Cloud</button>
+                <button id="load-btn" class="btn-tool">Load from Cloud</button>
+                <button id="restore-btn" title="Restore from cloud" class="btn-tool">Restore</button>
+                <button id="exportAll-btn" class="btn-tool">Export All</button>
+                <button id="importAll-btn" class="btn-tool">Import All</button>
+                <button id="delete-btn" class="btn-tool btn-danger" title="Delete file">Delete</button>
+                <button id="zoom-editor-in" title="Zoom in" class="btn-tool">🔍+</button>
+                <button id="zoom-editor-out" title="Zoom out" class="btn-tool">🔍-</button>
+                <button id="zoom-reset-btn" class="btn-tool" title="Reset zoom">🔍0</button>
+                <button id="copy-rendered-puml-btn" class="btn-tool" title="Copy rendered PUML">Copy PUML</button>
+                <a id="puml-external-link" href="#" target="_blank" title="Edit in PlantUML" class="btn-tool puml-only">🌐↗</a>
+                <button id="sync-toggle-btn" class="btn-tool" title="Stop/start cloud syncing">Stop Sync</button>
+                <button id="logout-btn" class="btn-tool" title="Logout of cloud">Logout</button>
+                <button id="test-btn" class="btn-tool" title="Test functionality">Test</button>
+            </div>
+        </header>
+
+        <div id="empty-state" class="empty-state">
+            <svg style="width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.2;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path></svg>
+            <p>Select a file from the menu to start editing</p>
+        </div>
+
+        <div id="workspace-grid" class="workspace-grid hidden">
+
+            <!-- LEFT / TOP -->
+            <div id="preview-pane" tabindex="-1"></div>
+
+            <!-- MIDDLE -->
+            <div id="editor-resizer" class="resizer"></div>
+
+            <!-- RIGHT / BOTTOM -->
+            <div id="editor-container">
+                <div id="md-toolbar" class="md-toolbar hidden">
+                    <button data-md="bold" title="Bold" class="btn-tool">B</button>
+                    <button data-md="italic" title="Italic" class="btn-tool"><i>I</i></button>
+                    <button data-md="underline" title="Underline" class="btn-tool">U</button>
+                    <button data-md="strike" title="Strikethrough" class="btn-tool">-S-</button>
+                    <button data-md="h1" title="Heading" class="btn-tool">H1</button>
+                    <button data-md="link" title="Insert link" class="btn-tool">8</button>
+                    <button data-md="code" title="Inline code" class="btn-tool">Code</button>
+                    <button data-md="quote" title="Indent" class="btn-tool">"</button>
+                    <button data-md="ul" title="Bullet point list" class="btn-tool">• -</button>
+                    <button data-md="ol" title="Numbered list" class="btn-tool">1. -</button>
+                    <button data-md="date" title="Insert current date" class="btn-tool">Date</button>
+                    <button data-md="hr" title="Section line" class="btn-tool">***</button>
+                    <button data-md="br" title="Line break" class="btn-tool">BR</button>
+                    <button data-md="color" title="Text color" class="btn-tool">Color</button>
+                    <button data-md="bgcolor" title="Background color" class="btn-tool">BG</button>
+                    <button data-md="table-menu" title="Table tools" class="btn-tool">⊞</button>
+                    <!-- <button data-md="convertMD" title="Convert to Markdown" class="btn-tool">➜MD</button> -->
+                    <button data-md="insert-expand" title="Insert Expand" class="btn-tool">▼</button>
+                    <button data-md="clear" title="Clear formatting" class="btn-tool">Clear</button>
+                </div>
+
+                <div id="md-color-popup" class="md-popup md-color-popup hidden">
+                    <button data-color="#e53935" class="color-swatch" style="background:#e53935"></button>
+                    <button data-color="#1e88e5" class="color-swatch" style="background:#1e88e5"></button>
+                    <button data-color="#43a047" class="color-swatch" style="background:#43a047"></button>
+                    <button data-color="#fdd835" class="color-swatch" style="background:#fdd835"></button>
+                </div>
+
+                <div id="md-bgcolor-popup" class="md-popup md-color-popup hidden">
+                    <button data-bg="#fff59d" class="color-swatch" style="background:#fff59d"></button>
+                    <button data-bg="#ffcc80" class="color-swatch" style="background:#ffcc80"></button>
+                    <button data-bg="#90caf9" class="color-swatch" style="background:#90caf9"></button>
+                    <button data-bg="#c5e1a5" class="color-swatch" style="background:#c5e1a5"></button>
+                </div>
+                <div id="table-popup" class="md-popup md-table-popup hidden">
+                    <div class="popup-section-title">Insert Table</div>
+                    <div class="popup-row">
+                        <button data-md="table-insert-2x2" class="btn-tool">2×2</button>
+                        <button data-md="table-insert-3x3" class="btn-tool">3×3</button>
+                        <button data-md="table-insert-4x4" class="btn-tool">4×4</button>
+                    </div>
+
+                    <div class="popup-section-title">Modify Table</div>
+                    <div class="popup-row">
+                        <button data-md="table-add-row" title="Add row" class="btn-tool">✚ ▼</button>
+                        <button data-md="table-add-col" title="Add column" class="btn-tool">✚ ►</button>
+                    </div>
+                    <div class="popup-row">
+                        <button data-md="table-del-row" title="Delete row" class="btn-tool">✖ ▼</button>
+                        <button data-md="table-del-col" title="Delete column" class="btn-tool">✖ ►</button>
+                    </div>
+                    <div class="popup-section-title">Tools</div>
+                    <div class="popup-row">
+                        <button data-md="table-format" title="Format Table" class="btn-tool">¶</button>
+                    </div>
+                    
+                </div>
+
+                <textarea id="editor-textarea" spellcheck="false" placeholder="Write here..."></textarea>
+            </div> <!-- closes #editor-container -->
+
+        </div> <!-- closes workspace-grid -->
+        <input 
+            type="file" 
+            id="workspace-import-file" 
+            accept="application/json" 
+            style="display:none"
+        />
+        <button id="zoom-reset-btn" class="btn-tool" title="Reset zoom">⟲</button>
+        <div id="search-bar" class="search-bar hidden">
+            <div class="search-group">
+                <input type="text" id="search-input" placeholder="Find...">
+                <input type="text" id="replace-input" placeholder="Replace with...">
+            </div>
+            <div class="search-actions">
+                <button id="find-next-btn" class="btn-tool">Next</button>
+                <button id="replace-btn" class="btn-tool">Replace</button>
+                <button id="replace-all-btn" class="btn-tool">All</button>
+                <button id="close-search-btn" class="btn-tool">×</button>
+            </div>
+        </div>
+    </main>
+
+<script type="module" src="./app.js"></script>
+
+
+</body>
+</html>
