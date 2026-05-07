@@ -43,7 +43,7 @@ import { logger, getCallerName } from "./logger.js";
 logger.debug("auth","auth.js loaded from:", import.meta.url);
 
 const GITHUB_CLIENT_ID = "Ov23lifa5weaz1hZmv1T";
-const WORKER_URL = "https://round-rain-473a.richard-191.workers.dev";
+const WORKER_URL = "https://round-rain-test.richard-191.workers.dev";
 
 export function getToken() {
     logger.debug("auth", () => "Running getToken(). CALLED BY: " + getCallerName("getToken"));
