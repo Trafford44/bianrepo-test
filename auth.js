@@ -193,26 +193,19 @@ export function bindLoginButton() {
 
 export async function handleOAuthRedirect() {
     logger.debug("auth", () => "Running handleOAuthRedirect(). CALLED BY: " + getCallerName("handleOAuthRedirect"));
-
     try {      
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
-
-        // Clean URL immediately
-        window.history.replaceState({}, "", window.location.pathname);
-
+        window.history.replaceState({}, "", window.location.pathname);  // clean URL immediately
         if (!code) {
             logger.info("auth: handleOAuthRedirect", "No code found in URL Params");
             return;
         }
-
-        // Exchange code for token via Worker
         const res = await fetch(WORKER_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ code })
         });
-
         if (!res.ok) {
             logger.error("auth: handleOAuthRedirect", "OAuth worker failed", res.status);
             return;
@@ -221,39 +214,19 @@ export async function handleOAuthRedirect() {
         const data = await res.json();
 
         if (data.access_token) {
-
-            const key = `github_token_${String(deviceId)}`;
-            logger.debug("auth: handleOAuthRedirect", "Saving token under key:", key);
-
-            // Save token
-            localStorage.setItem(key, data.access_token);
-
-            logger.debug("auth: handleOAuthRedirect", "After save, reading back token:", localStorage.getItem(key));
+            logger.debug("auth: handleOAuthRedirect", "Saving token under key:", "github_token_" + String(deviceId));
+            localStorage.setItem("github_token_" + String(deviceId), data.access_token);
+            logger.debug("auth: handleOAuthRedirect", "After save, reading back token:", localStorage.getItem(tokenKey()));
             logger.info("auth: handleOAuthRedirect", "GitHub login successful");
-
-            // Update UI
             updateLoginIndicator();
-
-            // Re-run sync logic now that token exists
             await runSyncCheck("login");
-
-            // *** CRITICAL FIX ***
-            // Ensure sync loop restarts AFTER login, not before
-            if (typeof startSyncLoop === "function") {
-                logger.debug("auth: handleOAuthRedirect", "Starting sync loop after login");
-                await startSyncLoop();
-            } else {
-                logger.warn("auth: handleOAuthRedirect", "startSyncLoop() not found");
-            }
 
         } else {
             logger.error("auth: handleOAuthRedirect", "OAuth response missing token", data);
         }
-
     } catch (error) {
         logger.error("auth: handleOAuthRedirect", error);
         return;
-    }
+    }    
+
 }
-
-
